@@ -8,6 +8,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import space.kodio.core.*
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * State holder for audio playback in Compose.
@@ -33,6 +35,9 @@ import space.kodio.core.*
  *             }
  *         )
  *         
+ *         // Show progress
+ *         Text("Time: ${playerState.position} / ${playerState.duration ?: "Unknown"}")
+ *         
  *         // Play/Pause button
  *         Button(
  *             onClick = { playerState.toggle() },
@@ -53,6 +58,7 @@ import space.kodio.core.*
 class PlayerState internal constructor(
     private val scope: CoroutineScope,
     private val device: AudioDevice.Output?,
+    private val positionUpdateInterval: Duration,
     private val getOnPlaybackComplete: () -> (() -> Unit)?
 ) {
     private var _player: Player? = null
@@ -63,7 +69,11 @@ class PlayerState internal constructor(
     private var _isFinished = mutableStateOf(false)
     private var _error = mutableStateOf<AudioError?>(null)
     private var _loadedRecording = mutableStateOf<AudioRecording?>(null)
+    private var _position = mutableStateOf(Duration.ZERO)
+    private var _duration = mutableStateOf<Duration?>(null)
     private var stateObserverJob: Job? = null
+    private var positionObserverJob: Job? = null
+    private var durationObserverJob: Job? = null
     
     // Mutex for thread-safe state transitions
     private val stateMutex = Mutex()
@@ -114,6 +124,16 @@ class PlayerState internal constructor(
      */
     val hasRecording: Boolean
         get() = _loadedRecording.value != null
+
+    /**
+     * The current playback position.
+     */
+    val position: Duration by _position
+
+    /**
+     * The total duration of the loaded audio, if known.
+     */
+    val duration: Duration? by _duration
 
     /**
      * Loads an [AudioRecording] for playback.
@@ -259,6 +279,10 @@ class PlayerState internal constructor(
         stateMutex.withLock {
             stateObserverJob?.cancel()
             stateObserverJob = null
+            positionObserverJob?.cancel()
+            positionObserverJob = null
+            durationObserverJob?.cancel()
+            durationObserverJob = null
             _player?.release()
             _player = null
             _loadedRecording.value = null
@@ -268,6 +292,8 @@ class PlayerState internal constructor(
             _isLoading.value = false
             _isFinished.value = false
             _error.value = null
+            _position.value = Duration.ZERO
+            _duration.value = null
         }
     }
 
@@ -277,16 +303,25 @@ class PlayerState internal constructor(
     internal fun release() {
         stateObserverJob?.cancel()
         stateObserverJob = null
+        positionObserverJob?.cancel()
+        positionObserverJob = null
+        durationObserverJob?.cancel()
+        durationObserverJob = null
         _player?.release()
         _player = null
     }
 
     private suspend fun createPlayer(): Player {
-        return Kodio.player(device)
+        val player = Kodio.player(device)
+        player.positionUpdateInterval = positionUpdateInterval
+        return player
     }
 
     private fun observePlayerState(player: Player) {
         stateObserverJob?.cancel()
+        positionObserverJob?.cancel()
+        durationObserverJob?.cancel()
+        
         stateObserverJob = scope.launch {
             player.stateFlow.collectLatest { state ->
                 when (state) {
@@ -326,6 +361,18 @@ class PlayerState internal constructor(
                 }
             }
         }
+        
+        positionObserverJob = scope.launch {
+            player.position.collectLatest { 
+                _position.value = it
+            }
+        }
+        
+        durationObserverJob = scope.launch {
+            player.duration.collectLatest {
+                _duration.value = it
+            }
+        }
     }
 }
 
@@ -333,12 +380,14 @@ class PlayerState internal constructor(
  * Creates and remembers a [PlayerState] for audio playback.
  * 
  * @param device Optional specific output device
+ * @param positionUpdateInterval The interval between position updates. Default is 20ms.
  * @param onPlaybackComplete Callback when playback finishes
  * @return A remembered PlayerState
  */
 @Composable
 fun rememberPlayerState(
     device: AudioDevice.Output? = null,
+    positionUpdateInterval: Duration = 20.milliseconds,
     onPlaybackComplete: (() -> Unit)? = null
 ): PlayerState {
     val scope = rememberCoroutineScope()
@@ -346,10 +395,11 @@ fun rememberPlayerState(
     // Use rememberUpdatedState to always have the latest callback
     val currentCallback by rememberUpdatedState(onPlaybackComplete)
     
-    val state = remember(device) {
+    val state = remember(device, positionUpdateInterval) {
         PlayerState(
             scope = scope,
             device = device,
+            positionUpdateInterval = positionUpdateInterval,
             getOnPlaybackComplete = { currentCallback }
         )
     }
@@ -369,6 +419,7 @@ fun rememberPlayerState(
  * 
  * @param recording The recording to load
  * @param device Optional specific output device
+ * @param positionUpdateInterval The interval between position updates. Default is 20ms.
  * @param onPlaybackComplete Callback when playback finishes
  * @return A remembered PlayerState with the recording loaded
  */
@@ -376,10 +427,12 @@ fun rememberPlayerState(
 fun rememberPlayerState(
     recording: AudioRecording,
     device: AudioDevice.Output? = null,
+    positionUpdateInterval: Duration = 20.milliseconds,
     onPlaybackComplete: (() -> Unit)? = null
 ): PlayerState {
     val state = rememberPlayerState(
         device = device,
+        positionUpdateInterval = positionUpdateInterval,
         onPlaybackComplete = onPlaybackComplete
     )
     

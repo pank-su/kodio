@@ -4,6 +4,7 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.flow.map
 import space.kodio.core.MacosAudioQueueProperty.CurrentDevice
 import space.kodio.core.util.namedLogger
+import kotlin.time.Duration
 
 private val logger = namedLogger("PlaybackSession")
 
@@ -20,6 +21,11 @@ class MacosAudioPlaybackSession(
     private lateinit var audioQueue: MacosAudioQueue.Writable
     private var paused = false
     private var outputFormat: AudioFormat? = null
+
+    override fun getNativePosition(): Duration? {
+        if (!::audioQueue.isInitialized) return null
+        return audioQueue.getCurrentTime()
+    }
 
     override suspend fun preparePlayback(format: AudioFormat): AudioFormat {
         logger.debug { "preparePlayback called with format: $format" }

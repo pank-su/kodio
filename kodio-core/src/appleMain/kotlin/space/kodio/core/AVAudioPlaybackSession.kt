@@ -8,6 +8,8 @@ import platform.AVFAudio.AVAudioEngine
 import platform.AVFAudio.AVAudioMixerNode
 import platform.AVFAudio.AVAudioPlayerNode
 import space.kodio.core.io.toIosAudioBuffer
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
     
@@ -18,6 +20,19 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
     init {
         engine.attachNode(mixer)
         engine.attachNode(player)
+    }
+
+    override fun getNativePosition(): Duration? {
+        if (!player.isPlaying()) return null
+        
+        val nodeTime = player.lastRenderTime ?: return null
+        val playerTime = player.playerTimeForNodeTime(nodeTime) ?: return null
+        
+        val sampleRate = playerTime.sampleRate
+        val sampleTime = playerTime.sampleTime
+        
+        if (sampleRate == 0.0) return null
+        return (sampleTime.toDouble() / sampleRate).seconds
     }
 
     abstract fun configureAudioSession()

@@ -11,13 +11,14 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.ui.tooling.preview.Preview
 import space.kodio.compose.AudioWaveform
-import space.kodio.compose.PlayerState
 import space.kodio.compose.RecorderState
 import space.kodio.compose.WaveformColors
 import space.kodio.compose.WaveformStyle
 import space.kodio.compose.rememberPlayerState
 import space.kodio.compose.rememberRecorderState
 import space.kodio.core.AudioRecording
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Sample app demonstrating Kodio features.
@@ -253,8 +254,8 @@ private fun RecordingItem(
     onSave: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val playerState = rememberPlayerState(recording)
-    
+    val playerState = rememberPlayerState(recording, positionUpdateInterval = 20.milliseconds)
+
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -277,10 +278,23 @@ private fun RecordingItem(
             
             // Recording info
             Column(modifier = Modifier.weight(1f)) {
+                val position = playerState.position
+                val duration = playerState.duration ?: recording.calculatedDuration
+                
                 Text(
-                    "Duration: ${recording.calculatedDuration}",
+                    "${formatDuration(position)} / ${formatDuration(duration)}",
                     style = MaterialTheme.typography.bodyMedium
                 )
+                
+                val progress = if (duration.inWholeMilliseconds > 0) {
+                    (position.inWholeMilliseconds.toDouble() / duration.inWholeMilliseconds.toDouble()).toFloat().coerceIn(0f, 1f)
+                } else 0f
+
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                )
+
                 Text(
                     "Size: ${recording.sizeInBytes} bytes",
                     style = MaterialTheme.typography.bodySmall,
@@ -299,4 +313,10 @@ private fun RecordingItem(
             }
         }
     }
+}
+
+private fun formatDuration(duration: Duration): String {
+    val minutes = duration.inWholeMinutes
+    val seconds = duration.inWholeSeconds % 60
+    return "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
 }

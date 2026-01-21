@@ -32,8 +32,10 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     protected abstract fun onResume()
     protected abstract fun onStop()
 
-    final override suspend fun load(audioFlow: AudioFlow) {
+    final override suspend fun load(audioFlow: AudioFlow, duration: Duration?) {
         _audioFlow.value = audioFlow
+        _duration.value = duration
+        _position.value = Duration.ZERO
         _state.value = State.Ready
     }
 
@@ -43,13 +45,24 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
             val playbackFormat = preparePlayback(audioFlow.format)
             val playbackAudioFlow = audioFlow.convertAudio(playbackFormat)
             _state.value = State.Playing
+            
+            startPositionPolling()
+            
             playbackJob = scope.launch {
                 runCatching {
                     playBlocking(playbackAudioFlow)
+                    
+                    // Force position to match duration when playback finishes successfully
+                    // This ensures the UI shows 100% progress even if the last poll was slightly before the end
+                    _duration.value?.let { fullDuration ->
+                        _position.value = fullDuration
+                    }
+                    
                     _state.value = State.Finished
                 }.onFailure {
                     _state.value = State.Error(it)
                 }
+                stopPositionPolling()
             }
         } catch (e: Exception) {
             _state.value = State.Error(e)
@@ -57,6 +70,7 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     }
 
     final override fun pause() {
+        stopPositionPolling()
         runAndUpdateState(State.Paused, ::onPause)
     }
 
@@ -65,10 +79,30 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     }
 
     final override fun stop() {
+        stopPositionPolling()
         runAndUpdateState(State.Idle) {
             onStop()
             playbackJob?.cancel()
+            _position.value = Duration.ZERO
         }
+    }
+
+    private fun startPositionPolling() {
+        positionPollingJob?.cancel()
+        positionPollingJob = scope.launch {
+            while (true) {
+                val nativePos = getNativePosition()
+                if (nativePos != null) {
+                    _position.value = nativePos
+                }
+                delay(positionUpdateInterval)
+            }
+        }
+    }
+
+    private fun stopPositionPolling() {
+        positionPollingJob?.cancel()
+        positionPollingJob = null
     }
 
     protected fun runAndUpdateState(newState: State, block: () -> Unit) {

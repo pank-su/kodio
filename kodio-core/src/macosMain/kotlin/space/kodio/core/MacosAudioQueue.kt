@@ -7,11 +7,14 @@ import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.coroutines.channels.onFailure
 import platform.AudioToolbox.*
+import platform.CoreAudioTypes.*
 import platform.CoreAudioTypes.AudioStreamBasicDescription
 import platform.darwin.UInt32Var
 import platform.posix.memcpy
 import space.kodio.core.util.namedLogger
 import kotlin.math.max
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 private val logger = namedLogger("AudioQueue")
 
@@ -21,6 +24,28 @@ sealed class MacosAudioQueue<S : Any>(
     internal val asbd: AudioStreamBasicDescription,
     internal val stateRef: StableRef<S>
 ) {
+
+    /**
+     * Gets the current playback time.
+     */
+    fun getCurrentTime(): Duration? {
+        return memScoped {
+            val timeStamp = alloc<AudioTimeStamp>()
+            // AudioQueueGetCurrentTime(inAQ, inTimeline, outTimeStamp, outTimelineDiscontinuity)
+            val status = AudioQueueGetCurrentTime(aqRef, null, timeStamp.ptr, null)
+            if (status == 0) { // noErr
+                if (timeStamp.mFlags.toInt() and kAudioTimeStampSampleTimeValid.toInt() != 0) {
+                    val sampleTime = timeStamp.mSampleTime
+                    val sampleRate = asbd.mSampleRate
+                    if (sampleRate > 0.0) {
+                        (sampleTime / sampleRate).seconds
+                    } else null
+                } else null
+            } else {
+                null
+            }
+        }
+    }
 
     class ReadOnly(
         aqRef: AudioQueueRef,
@@ -68,7 +93,8 @@ sealed class MacosAudioQueue<S : Any>(
                     val bufferRef = state.availableBuffers.receive()
                     logger.trace { "Got buffer, writing chunk..." }
                     val buffer = bufferRef.pointed
-                    writtenBytes = buffer.write(chunk, 0, chunk.size)
+                    val bytesWritten = buffer.write(chunk, 0, chunk.size)
+                    writtenBytes = bytesWritten 
                     logger.trace { "Wrote $writtenBytes bytes, enqueueing buffer..." }
                     aqRef.enqueueBuffer(bufferRef)
                 }

@@ -3,6 +3,8 @@ package space.kodio.core
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import javax.sound.sampled.SourceDataLine
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.microseconds
 
 /**
  * JVM implementation for [AudioPlaybackSession].
@@ -14,6 +16,10 @@ class JvmAudioPlaybackSession(private val device: AudioDevice.Output) : BaseAudi
     private val isPaused = MutableStateFlow(false)
 
     private var dataLine: SourceDataLine? = null
+
+    override fun getNativePosition(): Duration? {
+        return dataLine?.microsecondPosition?.microseconds
+    }
 
     override suspend fun preparePlayback(format: AudioFormat): AudioFormat {
         val mixer = getMixer(device)

@@ -2,6 +2,7 @@ package space.kodio.core
 
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlin.time.Duration
 
 /**
  * High-level wrapper around [AudioPlaybackSession] providing a simplified API.
@@ -45,6 +46,29 @@ class Player internal constructor(
         get() = session.state
 
     /**
+     * Flow of current playback position.
+     */
+    val position: StateFlow<Duration>
+        get() = session.position
+
+    /**
+     * Flow of total duration, if known.
+     */
+    val duration: StateFlow<Duration?>
+        get() = session.duration
+
+    /**
+     * Configuration: Minimum interval between position updates.
+     * 
+     * - Lower value (e.g. 15ms) = smoother UI, higher CPU load.
+     * - Higher value (e.g. 200ms) = jumpy UI, lower CPU load.
+     * Default is ~20ms.
+     */
+    var positionUpdateInterval: Duration
+        get() = session.positionUpdateInterval
+        set(value) { session.positionUpdateInterval = value }
+
+    /**
      * Whether the player is currently playing audio.
      */
     val isPlaying: Boolean
@@ -78,7 +102,7 @@ class Player internal constructor(
      * Loads an [AudioRecording] for playback.
      */
     suspend fun load(recording: AudioRecording) {
-        session.load(recording.asAudioFlow())
+        session.load(recording.asAudioFlow(), recording.calculatedDuration)
     }
 
     /**

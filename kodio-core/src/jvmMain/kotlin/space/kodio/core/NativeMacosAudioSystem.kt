@@ -23,6 +23,8 @@ import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 private val logger = namedLogger("NativeMacosAudio")
 
@@ -330,6 +332,14 @@ private class NativeMacosAudioPlaybackSession(
     private val _audioFlowHolder = MutableStateFlow<AudioFlow?>(null)
     override val audioFlow: StateFlow<AudioFlow?> = _audioFlowHolder.asStateFlow()
 
+    private val _position = MutableStateFlow(Duration.ZERO)
+    override val position: StateFlow<Duration> = _position.asStateFlow()
+
+    private val _duration = MutableStateFlow<Duration?>(null)
+    override val duration: StateFlow<Duration?> = _duration.asStateFlow()
+
+    override var positionUpdateInterval: Duration = 20.milliseconds
+
     companion object {
         private val IDX = AtomicLong(1L)
         private val SESSIONS = ConcurrentHashMap<Long, NativeMacosAudioPlaybackSession>()
@@ -357,8 +367,10 @@ private class NativeMacosAudioPlaybackSession(
     private var id: Long = 0L
     private var loaded = false
 
-    override suspend fun load(audioFlow: AudioFlow) {
+    override suspend fun load(audioFlow: AudioFlow, duration: Duration?) {
         _audioFlowHolder.value = audioFlow
+        _duration.value = duration
+        _position.value = Duration.ZERO
         
         val arena = Arena.ofShared().also { runtimeArena = it }
         id = IDX.getAndIncrement()

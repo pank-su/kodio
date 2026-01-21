@@ -7,6 +7,8 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.AudioFormat as AndroidAudioFormat
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 internal class AndroidAudioPlaybackSession(
     private val context: Context,
@@ -17,6 +19,19 @@ internal class AndroidAudioPlaybackSession(
     private lateinit var preparedFormat: AudioFormat
     private var androidEncoding: Int = AndroidAudioFormat.ENCODING_INVALID
     private var androidChannelMask: Int = 0
+
+    override fun getNativePosition(): Duration? {
+        val track = audioTrack ?: return null
+        val sampleRate = preparedFormat.sampleRate
+        if (sampleRate == 0) return null
+        
+        // playbackHeadPosition returns frames played
+        // Wrap around logic is handled by AudioTrack automatically (it's a 32-bit int)
+        // But for short clips 32-bit int frames is plenty (24 hours at 48kHz).
+        // If track is reused/looped, logic might be needed, but here we recreate track or stop.
+        val frames = track.playbackHeadPosition.toLong() and 0xFFFFFFFFL // treat as unsigned just in case
+        return (frames.toDouble() / sampleRate).seconds
+    }
 
     override suspend fun preparePlayback(format: AudioFormat): AudioFormat {
         ensureInterleaved(format) // AudioTrack expects interleaved frames
