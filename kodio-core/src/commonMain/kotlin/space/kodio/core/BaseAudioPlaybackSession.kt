@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlinx.coroutines.delay
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
 
@@ -18,11 +21,26 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     override val state: StateFlow<State> = _state.asStateFlow()
 
     private var playbackJob: Job? = null
+    private var positionPollingJob: Job? = null
 
     private val _audioFlow = MutableStateFlow<AudioFlow?>(null)
     override val audioFlow: StateFlow<AudioFlow?> = _audioFlow.asStateFlow()
 
+    private val _position = MutableStateFlow(Duration.ZERO)
+    override val position: StateFlow<Duration> = _position.asStateFlow()
+
+    private val _duration = MutableStateFlow<Duration?>(null)
+    override val duration: StateFlow<Duration?> = _duration.asStateFlow()
+
+    override var positionUpdateInterval: Duration = 20.milliseconds
+
     protected val scope = CoroutineScope(Dispatchers.Default) + SupervisorJob()
+
+    /**
+     * Should return the current playback position from the underlying audio system.
+     * Returns null if exact position cannot be determined.
+     */
+    protected abstract fun getNativePosition(): Duration?
 
     abstract suspend fun preparePlayback(format: AudioFormat): AudioFormat
 
@@ -76,6 +94,7 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
 
     final override fun resume() {
         runAndUpdateState(State.Playing, ::onResume)
+        startPositionPolling()
     }
 
     final override fun stop() {
